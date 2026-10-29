@@ -25,8 +25,12 @@
     "Do not use deprecated component variants. See deprecatedVariants above.",
     "Do not use max-w-xs, max-w-sm, max-w-md, max-w-lg, or max-w-xl — these collide with the approved spacing scale tokens and silently resolve to spacing values instead of container widths. Use a numeric utility (e.g. max-w-96) or a size outside that range (max-w-2xl+) instead."
   ],
-  "accessibilityRules": [],
-  "responsiveRules": [],
+  "accessibilityRules": [
+    "Icon-only buttons must have an aria-label that describes the action (e.g. aria-label=\"Cart\")", 
+    "Every form input needs a <label> or aria-label. A placeholder is not a label","Ensure that all interactive elements can be accessed and operated using a keyboard. Verify that focus follows a logical order, is clearly visible, and is not trapped or obscured. Do not rely exclusively on hover or pointer interactions.",
+    "Ensure that every form field has a clear, persistent label and that required fields are identified. Error messages must explain what went wrong and how to correct it, and must be associated with the relevant field. Do not rely on placeholder text alone as a field label."
+  ],
+  "responsiveRules": ["Ensure that layouts adapt appropriately to the available viewport width. Multi-column layouts should reflow, stack, or otherwise adjust when space becomes insufficient, without causing content overlap, excessive compression, or loss of functionality.", "Ensure that spacing, padding, and gaps adapt to smaller viewports without reducing content readability or causing components to touch or overlap. Preserve a consistent visual hierarchy while avoiding excessive empty space and unnecessary horizontal margins on mobile devices.", "Multi-column grids must stack on mobile: start with grid-cols-1 and add columns at md: or above", "No fixed widths wider than a phone screen (over w-80 / 320px) without a responsive prefix. Use w-full with a max-w-* cap instead."],
   "spacingScale": {
     "xs": "0.5rem",
     "sm": "1rem",

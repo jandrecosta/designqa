@@ -20,7 +20,7 @@ import fs from "node:fs";
 
 // --- Placeholders — update these to match your repo structure ---
 const PLACEHOLDER_MANIFEST_PATH = "./manifest.json"; // now pointed at the real manifest
-const CLAUDE_MODEL = "claude-haiku-4-5-20251001"; // swap for 'claude-sonnet-5' if you want stronger reasoning
+const CLAUDE_MODEL = "claude-opus-5-5";
 
 // ============================================================
 // ALREADY WIRED — fetch the PR diff
@@ -54,6 +54,34 @@ function readManifest() {
 }
 
 // ============================================================
+// Prefix every added and context line with its line number in the
+// new file, so the model doesn't have to count from hunk headers.
+//   "+  44| code"  added line 44
+//   "   45| code"  unchanged line 45
+//   "-    | code"  removed line (no longer in the file)
+// ============================================================
+function annotateDiff(diff) {
+  let newLine = 0;
+  return diff
+    .split("\n")
+    .map((line) => {
+      const hunk = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+      if (hunk) {
+        newLine = Number(hunk[1]);
+        return line;
+      }
+      if (line.startsWith("+++") || line.startsWith("---") || line.startsWith("diff ") || line.startsWith("index ")) {
+        return line;
+      }
+      if (line.startsWith("+")) return `+${String(newLine++).padStart(4)}| ${line.slice(1)}`;
+      if (line.startsWith("-")) return `-    | ${line.slice(1)}`;
+      if (line.startsWith(" ")) return ` ${String(newLine++).padStart(4)}| ${line.slice(1)}`;
+      return line;
+    })
+    .join("\n");
+}
+
+// ============================================================
 // YOUR JOB — write the prompt
 //
 // This is the only part you need to write. Everything else below
@@ -79,13 +107,51 @@ function readManifest() {
 // If there are no issues, "pass" should be true and "findings" empty.
 // ============================================================
 function buildPrompt(diff, manifest) {
-  return `TODO: write your prompt here.
+  return `You are a design QA reviewer for a pull request. Your single source of
+truth is the component manifest below. Compare the code in the diff against
+the manifest and decide whether the diff complies with it.
+
+Rules for your review:
+- The manifest is the ONLY authority. Check the diff against everything it
+  defines: approvedVariants, approvedSizes, deprecatedVariants, and every
+  entry in "rules", "accessibilityRules", and "responsiveRules".
+- An issue is a violation of something stated in the manifest, and nothing
+  else. Do not flag anything the manifest does not cover — no personal style
+  opinions, no rules that are not written in the manifest. If a rule is not
+  in the manifest, it is not an issue, even if you would normally recommend
+  it. (This means adding a rule to the manifest is all it takes to start
+  enforcing it — your review automatically picks it up.)
+- Only review lines that the diff adds or changes (lines starting with "+").
+  Lines starting with "-" have been removed and no longer exist; never report
+  them, even if they broke a rule. Unchanged lines (starting with a space)
+  are context only.
+- Report only violations that are present in the added lines as they are
+  now. If you check something and conclude it complies, or that a violation
+  was fixed by this diff, leave it out entirely. A finding must never say
+  that something is valid, correct, or already fixed.
+- Every diff line is prefixed with its line number in the new file, e.g.
+  "+  44| <code>". Use that number as "line". Do not count lines yourself
+  and do not use positions within the diff.
+- For every issue, give the file, the line, a short description of what is
+  wrong, and reasoning that cites the specific manifest rule, approved list,
+  or deprecated variant it violates.
+
+Respond with ONLY valid JSON — no markdown, no prose outside the JSON — in
+exactly this shape:
+{
+  "pass": true or false,
+  "findings": [
+    { "file": "...", "line": "...", "issue": "...", "reasoning": "..." }
+  ]
+}
+Set "pass" to false if there is at least one finding, true otherwise. If
+there are no issues, "pass" must be true and "findings" must be an empty array.
 
 Manifest:
 ${manifest}
 
 Diff:
-${diff}`;
+${annotateDiff(diff)}`;
 }
 
 // ============================================================
@@ -100,11 +166,15 @@ async function checkDesignCompliance(diff, manifest) {
     headers: {
       "x-api-key": process.env.ANTHROPIC_API_KEY,
       "anthropic-version": "2023-06-01",
+      "anthropic-beta": "server-side-fallback-2026-07-01",
       "content-type": "application/json",
     },
     body: JSON.stringify({
       model: CLAUDE_MODEL,
-      max_tokens: 1024,
+      // Thinking is always on for this model and counts toward max_tokens.
+      max_tokens: 16000,
+      // If a safety classifier declines, retry on a fallback model in the same call.
+      fallbacks: "default",
       messages: [{ role: "user", content: prompt }],
     }),
   });
@@ -124,7 +194,20 @@ async function checkDesignCompliance(diff, manifest) {
     };
   }
 
-  const text = data.content?.[0]?.text ?? "";
+  if (data.stop_reason === "refusal") {
+    return {
+      pass: false,
+      findings: [{
+        file: "-",
+        line: "-",
+        issue: "Model declined the request",
+        reasoning: data.stop_details?.explanation || "stop_reason: refusal",
+      }],
+    };
+  }
+
+  // The response starts with a thinking block, so find the text block.
+  const text = data.content?.find((block) => block.type === "text")?.text ?? "";
 
   try {
     const cleaned = text.replace(/```json\n?|```\n?/g, "").trim();
