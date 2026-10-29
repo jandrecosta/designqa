@@ -16,6 +16,10 @@ jobs:
     steps:
       - name: Check out repo
         uses: actions/checkout@v4
+        with:
+          # Run the agent with the PR branch's own prompt and manifest,
+          # not the merge result with main.
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Set up Node
         uses: actions/setup-node@v4
