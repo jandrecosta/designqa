@@ -41,7 +41,7 @@ function App() {
               Shop
             </a>
             <Button
-              variant="ghost"
+              variant="outline"
             >
               Sign in
             </Button>
